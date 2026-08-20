@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./krishisaathi.db
+      - SECRET_KEY=krishisaathi_super_secret_jwt_key_sih_hackathon_demo_2026
+    volumes:
+      - ./backend/uploads:/app/uploads
+    restart: always
