@@ -1,5 +1,8 @@
 import os
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
+
+load_dotenv()
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "KrishiSaathi Backend"
@@ -18,6 +21,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     WEATHER_API_KEY: str = ""
     MARKET_API_KEY: str = ""
+    DATA_GOV_IN_API_KEY: str = ""
     FIREBASE_CREDENTIALS_PATH: str = ""
 
     # Uploads

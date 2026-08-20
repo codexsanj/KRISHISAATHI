@@ -75,16 +75,19 @@ def compare_markets(crop: Optional[str] = Query("Ginger")):
     prices = market_service.get_prices(crop)
     if not prices:
         return {"crop": crop, "comparison": []}
+    valid_prices = [p for p in prices if p.get("modal_price") is not None]
+    if not valid_prices:
+        return {"crop": crop, "comparison": []}
 
-    highest = max(prices, key=lambda x: x["modal_price"])
-    lowest = min(prices, key=lambda x: x["modal_price"])
-    avg_price = sum(p["modal_price"] for p in prices) / len(prices)
+    highest = max(valid_prices, key=lambda x: x["modal_price"])
+    lowest = min(valid_prices, key=lambda x: x["modal_price"])
+    avg_price = sum(p["modal_price"] for p in valid_prices) / len(valid_prices)
 
     return {
         "crop": crop,
-        "highest_market": highest["mandi"],
+        "highest_market": highest.get("market"),
         "highest_price": highest["modal_price"],
-        "lowest_market": lowest["mandi"],
+        "lowest_market": lowest.get("market"),
         "lowest_price": lowest["modal_price"],
         "average_price": round(avg_price, 2),
         "comparison": prices

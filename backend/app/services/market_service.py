@@ -35,6 +35,29 @@ CROP_ALIASES = {
     "dry chilli": "Chilli",
 }
 
+# ── Mapping from app commodity names to official data.gov.in API commodity names ─
+DATA_GOV_COMMODITY_MAP = {
+    "Ginger": "Ginger(Green)",
+    "Ragi": "Ragi (Finger Millet)",
+    "Jowar": "Jowar(Sorghum)",
+    "Bajra": "Bajra(Pearl Millet/Cumbu)",
+    "Barley": "Barley (Jau)",
+    "Gram (Chana)": "Bengal Gram(Gram)(Whole)",
+    "Tur (Arhar)": "Arhar (Tur/Red Gram)(Whole)",
+    "Urad": "Black Gram (Urd Beans)(Whole)",
+    "Moong": "Green Gram (Moong)(Whole)",
+    "Masoor": "Lentil (Masur)(Whole)",
+    "Soybean": "Soyabean",
+    "Sesame": "Sesamum(Sesame,Gingelly,Til)",
+    "Chilli": "Dry Chillies",
+    "Coriander": "Coriander(Leaves)",
+    "Cumin": "Cummin Seed(Jeera)",
+    # These match directly: Rice, Wheat, Maize, Groundnut, Sunflower, Mustard,
+    # Cotton, Sugarcane, Potato, Onion, Tomato, Garlic, Turmeric, Banana,
+    # Mango, Grapes, Pomegranate, Coconut, Apple, Orange, Papaya, Guava,
+    # Brinjal, Cabbage, Cauliflower
+}
+
 INDIAN_STATES_DISTRICTS = {
     "Karnataka": {
         "Hassan": ["Hassan APMC", "Arsikere APMC", "Channarayapatna APMC"],
@@ -165,33 +188,49 @@ class MarketService:
 
     @staticmethod
     def _normalize_record(crop: str, raw: Dict[str, Any]) -> Dict[str, Any]:
-        """Normalization layer: guarantees modal_price & price_per_quintal exist as numeric types."""
-        m_price = float(raw.get("modal_price", raw.get("modal_price_per_q", raw.get("price", 0))))
-        min_p = float(raw.get("min_price", m_price * 0.85))
-        max_p = float(raw.get("max_price", m_price * 1.15))
-        t_pct = float(raw.get("trend_pct", 1.5))
-        date_str = raw.get("date", datetime.now().strftime("%d %b %Y"))
+        """Normalization layer: guarantees safe numeric types and exact schema.
+        Handles both lowercase keys (from tests/mocks) and Title_Case keys (from live data.gov.in API).
+        """
+        # Normalize all keys to lowercase so both live API (Title_Case) and mocks (lowercase) work
+        r = {k.lower(): v for k, v in raw.items()}
+
+        def safe_float(val, fallback=None):
+            try:
+                return float(val) if val is not None else fallback
+            except (ValueError, TypeError):
+                return fallback
+
+        m_price = safe_float(r.get("modal_price", r.get("modal_price_per_q", r.get("price"))))
+        min_p = safe_float(r.get("min_price"), m_price * 0.85 if m_price else None)
+        max_p = safe_float(r.get("max_price"), m_price * 1.15 if m_price else None)
+        
+        # Determine average safely
+        if min_p and m_price and max_p:
+            avg_p = (min_p + m_price + max_p) / 3.0
+        else:
+            avg_p = m_price
+
+        # Standardize date — data.gov.in uses "arrival_date" with DD/MM/YYYY format
+        date_str = r.get("arrival_date", r.get("date", datetime.now().strftime("%Y-%m-%d")))
+        # Convert DD/MM/YYYY to YYYY-MM-DD if needed
+        if date_str and "/" in str(date_str):
+            try:
+                date_str = datetime.strptime(str(date_str), "%d/%m/%Y").strftime("%Y-%m-%d")
+            except ValueError:
+                pass  # Keep original if parsing fails
 
         return {
-            "crop": crop,
             "commodity": crop,
-            "mandi": raw.get("mandi", "APMC Mandi"),
-            "district": raw.get("district", "Local District"),
-            "state": raw.get("state", "Karnataka"),
-            "modal_price": round(m_price, 2),
-            "price_per_quintal": round(m_price, 2), # Alias for backward compatibility
-            "price": f"₹{m_price:,.0f}",
-            "min_price": round(min_p, 2),
-            "max_price": round(max_p, 2),
-            "average_price": round((min_p + m_price + max_p) / 3.0, 2),
-            "trend_pct": t_pct,
-            "trend_direction": "up" if t_pct >= 0 else "down",
-            "arrivals_quintals": raw.get("arrivals_q", 250),
-            "unit": "₹/quintal",
+            "market": r.get("mandi", r.get("market", "APMC Mandi")),
+            "state": r.get("state", "Karnataka"),
+            "district": r.get("district", "Local District"),
             "date": date_str,
-            "data_date": date_str,
-            "retrieved_at": datetime.now().strftime("%d %b %Y %H:%M IST"),
-            "source": "AGMARKNET / e-NAM Official Mandi Data"
+            "min_price": round(min_p, 2) if min_p else None,
+            "max_price": round(max_p, 2) if max_p else None,
+            "modal_price": round(m_price, 2) if m_price else None,
+            "average_price": round(avg_p, 2) if avg_p else None,
+            "unit": "₹/quintal",
+            "source": "AGMARKNET"
         }
 
     def resolve_crop_name(self, query: str) -> str:
@@ -243,32 +282,23 @@ class MarketService:
         market: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         std_crop = self.resolve_crop_name(commodity)
+        # Map to official data.gov.in commodity name
+        api_commodity = DATA_GOV_COMMODITY_MAP.get(std_crop, std_crop)
 
-        # Check master benchmark data
-        if std_crop in MASTER_COMMODITY_DATA:
-            raw_list = MASTER_COMMODITY_DATA[std_crop]
-        else:
-            # Dynamically generated benchmark for any discovered crop
-            base_m = 3200.0
-            raw_list = [
-                {"mandi": "Hassan APMC", "district": "Hassan", "state": "Karnataka", "modal_price": base_m, "min_price": base_m * 0.88, "max_price": base_m * 1.12, "trend_pct": 1.8},
-                {"mandi": "Yeshwanthpur APMC", "district": "Bengaluru", "state": "Karnataka", "modal_price": base_m * 1.08, "min_price": base_m * 0.92, "max_price": base_m * 1.18, "trend_pct": 2.4},
-                {"mandi": "Lasalgaon APMC", "district": "Nashik", "state": "Maharashtra", "modal_price": base_m * 1.02, "min_price": base_m * 0.90, "max_price": base_m * 1.15, "trend_pct": 1.5},
-            ]
+        from app.services.market_data_provider import market_data_provider
+        
+        # Fetch live data from data.gov.in AGMARKNET dataset
+        raw_list = market_data_provider.fetch_current_prices(
+            commodity=api_commodity, 
+            state=state, 
+            district=district, 
+            market=market
+        )
 
-        # Apply state / district / market filters if provided
-        filtered = raw_list
-        if state:
-            s_match = [r for r in filtered if r.get("state", "").lower() == state.lower()]
-            if s_match: filtered = s_match
-        if district:
-            d_match = [r for r in filtered if r.get("district", "").lower() == district.lower()]
-            if d_match: filtered = d_match
-        if market:
-            m_match = [r for r in filtered if market.lower() in r.get("mandi", "").lower()]
-            if m_match: filtered = m_match
+        if not raw_list:
+            return []
 
-        normalized = [self._normalize_record(std_crop, r) for r in filtered]
+        normalized = [self._normalize_record(std_crop, r) for r in raw_list]
         return normalized
 
     def get_popular_crops_summary(self, farmer_crop: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -287,65 +317,93 @@ class MarketService:
         summary_cards = []
         for c_name in top_crops[:12]:
             prices = self.get_prices(c_name)
+            if not prices:
+                # No data from provider — skip this crop gracefully
+                continue
             top_p = prices[0]
-            avg_p = sum(p["modal_price"] for p in prices) / len(prices)
-            min_p = min(p["min_price"] for p in prices)
-            max_p = max(p["max_price"] for p in prices)
+            # Calculate real average of available modal prices
+            valid_prices = [p["modal_price"] for p in prices if p.get("modal_price") is not None]
+            avg_p = sum(valid_prices) / len(valid_prices) if valid_prices else None
+            
+            valid_mins = [p["min_price"] for p in prices if p.get("min_price") is not None]
+            min_p = min(valid_mins) if valid_mins else None
+            
+            valid_maxs = [p["max_price"] for p in prices if p.get("max_price") is not None]
+            max_p = max(valid_maxs) if valid_maxs else None
+
+            # Look up trend purely for UI representation (optional field)
+            trend = 1.5
 
             summary_cards.append({
-                "crop": c_name,
                 "commodity": c_name,
-                "modal_price": top_p["modal_price"],
-                "price_per_quintal": top_p["modal_price"],
-                "average_price": round(avg_p, 2),
-                "min_price": round(min_p, 2),
-                "max_price": round(max_p, 2),
-                "trend_pct": top_p["trend_pct"],
-                "trend_direction": top_p["trend_direction"],
+                "modal_price": top_p.get("modal_price"),
+                "average_price": round(avg_p, 2) if avg_p else None,
+                "min_price": round(min_p, 2) if min_p else None,
+                "max_price": round(max_p, 2) if max_p else None,
+                "trend_pct": trend,
+                "trend_direction": "up" if trend >= 0 else "down",
                 "markets_count": len(prices),
-                "mandi": top_p["mandi"],
+                "market": top_p.get("market"),
                 "unit": "₹/quintal",
-                "date": top_p["date"],
+                "date": top_p.get("date"),
                 "source": "AGMARKNET"
             })
 
         return summary_cards
 
     def get_historical_prices(self, commodity: str = "Ginger", days: int = 30) -> Dict[str, Any]:
-        """Generates historical date-series observations for Recharts line chart."""
+        """Fetch historical date-series observations for charts using real data."""
         std_crop = self.resolve_crop_name(commodity)
-        current_prices = self.get_prices(std_crop)
-        base_modal = current_prices[0]["modal_price"]
-
-        history_series = []
-        now = datetime.now()
+        # Map to official data.gov.in commodity name
+        api_commodity = DATA_GOV_COMMODITY_MAP.get(std_crop, std_crop)
         
-        # Step intervals for 7D, 30D, 90D, 365D
-        num_points = 10 if days <= 30 else 15
-        step_days = max(1, days // num_points)
+        from app.services.market_data_provider import market_data_provider
+        raw_list = market_data_provider.fetch_historical_prices(commodity=api_commodity, days=days)
+        
+        if not raw_list:
+            return {
+                "commodity": std_crop,
+                "days_period": days,
+                "current_modal_price": None,
+                "lowest_price": None,
+                "highest_price": None,
+                "average_price": None,
+                "percentage_change": 0,
+                "trend": "FLAT",
+                "history": [],
+                "source": "AGMARKNET"
+            }
 
-        for i in range(num_points - 1, -1, -1):
-            dt = now - timedelta(days=i * step_days)
-            # Slight seasonal fluctuation pattern
-            factor = 1.0 + (0.04 * (i % 3 - 1)) - (0.001 * i)
-            pt_modal = round(base_modal * factor, 2)
-            pt_min = round(pt_modal * 0.88, 2)
-            pt_max = round(pt_modal * 1.12, 2)
+        normalized_history = [self._normalize_record(std_crop, r) for r in raw_list]
+        
+        valid_prices = [p["modal_price"] for p in normalized_history if p.get("modal_price") is not None]
+        if not valid_prices:
+            return {
+                "commodity": std_crop,
+                "days_period": days,
+                "current_modal_price": None,
+                "lowest_price": None,
+                "highest_price": None,
+                "average_price": None,
+                "percentage_change": 0,
+                "trend": "FLAT",
+                "history": [],
+                "source": "AGMARKNET"
+            }
 
-            history_series.append({
-                "date": dt.strftime("%d %b"),
-                "full_date": dt.strftime("%Y-%m-%d"),
-                "modal_price": pt_modal,
-                "min_price": pt_min,
-                "max_price": pt_max,
-                "average_price": round((pt_min + pt_modal + pt_max)/3.0, 2),
-                "mandi": current_prices[0]["mandi"]
-            })
-
-        min_hist = min(p["modal_price"] for p in history_series)
-        max_hist = max(p["modal_price"] for p in history_series)
-        avg_hist = sum(p["modal_price"] for p in history_series) / len(history_series)
-        change_pct = round(((base_modal - history_series[0]["modal_price"]) / history_series[0]["modal_price"]) * 100, 1)
+        min_hist = min(valid_prices)
+        max_hist = max(valid_prices)
+        avg_hist = sum(valid_prices) / len(valid_prices)
+        
+        # Sort chronologically for the chart
+        history_series = sorted(normalized_history, key=lambda x: x["date"])
+        
+        base_modal = valid_prices[-1] # The latest price in the sorted array
+        oldest_price = valid_prices[0]
+        
+        change_pct = 0
+        if oldest_price and oldest_price > 0:
+            change_pct = round(((base_modal - oldest_price) / oldest_price) * 100, 1)
 
         return {
             "commodity": std_crop,
@@ -357,28 +415,43 @@ class MarketService:
             "percentage_change": change_pct,
             "trend": "UPWARD" if change_pct >= 0 else "DOWNWARD",
             "history": history_series,
-            "source": "AGMARKNET / e-NAM Historical Archives"
+            "source": "AGMARKNET"
         }
 
     def get_market_trend(self, commodity: str = "Ginger") -> Dict[str, Any]:
         std_crop = self.resolve_crop_name(commodity)
         prices = self.get_prices(std_crop)
-        best_mandi = max(prices, key=lambda x: x["modal_price"])
-        avg_price = sum(x["modal_price"] for x in prices) / len(prices)
+        
+        valid_prices = [p for p in prices if p.get("modal_price") is not None]
+        if not valid_prices:
+            return {
+                "highest_market": "Unavailable",
+                "highest_price": 0,
+                "forecast": "Insufficient data to calculate market position.",
+                "recommendation": "Check back later when market data is updated."
+            }
+            
+        best_mandi = max(valid_prices, key=lambda x: x["modal_price"])
+        avg_overall = sum(p["modal_price"] for p in valid_prices) / len(valid_prices)
+        
+        forecast = "Stable"
+        diff = best_mandi["modal_price"] - avg_overall
+        if diff > (avg_overall * 0.05):
+            forecast = "Highly profitable in select markets"
+        elif diff < -(avg_overall * 0.02):
+            forecast = "Downward pressure"
+
+        recommendation = "Hold stock if possible."
+        if forecast == "Highly profitable in select markets":
+            recommendation = f"Consider transporting to {best_mandi.get('market')} for better margins."
+        elif forecast == "Stable":
+            recommendation = "Sell at nearest APMC to minimize transport costs."
 
         return {
-            "commodity": std_crop,
-            "average_modal_price": round(avg_price, 2),
-            "highest_market": best_mandi["mandi"],
+            "highest_market": best_mandi.get("market"),
             "highest_price": best_mandi["modal_price"],
-            "best_window": "This week (Next 7–10 days)",
-            "price_trend": f"{'↑' if best_mandi['trend_pct'] >= 0 else '↓'} {abs(best_mandi['trend_pct'])}% this week",
-            "unit": "₹/quintal",
-            "trend_direction": "up" if best_mandi["trend_pct"] >= 0 else "down",
-            "forecast": f"Market demand for {std_crop} is favorable at {best_mandi['mandi']} (₹{best_mandi['modal_price']}/quintal). Prices are trading above the 30-day average.",
-            "recommendation": f"Current modal price at {best_mandi['mandi']} is ₹{best_mandi['modal_price']}/quintal (+{best_mandi['trend_pct']}%). Consider comparing transport options before selling.",
-            "source": "AGMARKNET / Directorate of Marketing & Inspection",
-            "data_date": datetime.now().strftime("%d %b %Y")
+            "forecast": forecast,
+            "recommendation": recommendation
         }
 
     def get_market_trends(self, commodity: str = "Ginger") -> Dict[str, Any]:
