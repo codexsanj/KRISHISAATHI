@@ -2,7 +2,6 @@ from fastapi import APIRouter, Query, Depends
 from typing import Optional, List, Dict, Any
 from app.services.market_service import market_service
 from app.ai.farm_intelligence.selling_decision_engine import selling_decision_engine
-from app.api.routes.auth import get_current_user
 
 router = APIRouter(prefix="/market", tags=["market"])
 
