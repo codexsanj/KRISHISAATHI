@@ -1,61 +1,49 @@
-# 🌱 KrishiSaathi
+# 🌱 KrishiSaathi Backend Service
 
-## Smart Crop Advisory System for Small and Marginal Farmers
+FastAPI Backend & Agricultural Decision Intelligence Engine for KrishiSaathi.
 
-> **Data → Intelligence → Decision → Action**
+## 🚀 Quickstart (Local Development)
 
-KrishiSaathi is an AI-powered, farmer-first agricultural decision-support platform designed to help small and marginal farmers make timely, personalized and informed farming decisions.
+### 1. Install Dependencies
+```bash
+pip install -r requirements.txt
+```
 
-Instead of simply displaying agricultural information, KrishiSaathi combines:
+### 2. Seed Database
+```bash
+python scripts/seed_database.py
+```
 
-**Farm + Soil + Crop + Weather + Market + Crop Health**
+### 3. Run FastAPI Backend Server
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+The API documentation will be available at [http://localhost:8000/docs](http://localhost:8000/docs).
 
-to generate actionable recommendations that answer three simple questions:
-
-> **What should I do?**  
-> **When should I do it?**  
-> **Why should I do it?**
-
----
-
-## 🏆 Smart India Hackathon 2026
-
-| | |
-|---|---|
-| **Problem Statement** | SIH260491 |
-| **Title** | Smart Crop Advisory System for Small and Marginal Farmers |
-| **Organisation** | Government of Punjab |
-| **Theme** | Agriculture, FoodTech & Rural Development |
-| **Category** | Software |
-| **Competition** | Smart India Hackathon 2026 |
-
-> This is a software-based problem statement. Hardware is not required for the core solution.
+### 4. Run Pytest Test Suite
+```bash
+pytest tests/
+```
 
 ---
 
-# 📌 Problem
+## 🐳 Docker Deployment
 
-Small and marginal farmers make numerous decisions throughout the farming cycle:
+```bash
+docker-compose up --build
+```
 
-- Which crop should I grow?
-- Is my soil suitable?
-- When should I sow?
-- How much fertilizer should I use?
-- When should I irrigate?
-- Is my crop affected by a disease?
-- Is there a pest risk?
-- Where and when should I sell?
-- What should I do today?
+---
 
-These decisions depend on several constantly changing factors:
+## 🌾 Intelligence Subsystems & Fallback Policy
 
-```text
-Location
-Soil
-Crop
-Season
-Weather
-Water Availability
-Crop Health
-Market Conditions
-Farm History
+| Subsystem | Primary Engine | Local Fallback Provider |
+|---|---|---|
+| **Weather Adapter** | IMD / AgMet Data Source | Local AgMet Development Provider |
+| **Market Intelligence** | Agmarknet / e-NAM API | Mandi Market Trend Provider |
+| **Irrigation Advisory** | Deterministic Decision Engine | Soil Water Capacity Rule Engine |
+| **Crop Recommendation** | Scikit-learn / XGBoost + SHAP | ICAR Agro-Climatic Matrix |
+| **Disease Detection** | PyTorch ResNet-18 Leaf Classifier | OpenCV / Rule-based Diagnostic Fallback |
+| **Pest Outbreak Risk** | XGBoost Pest Model | Temperature-Humidity Risk Matrix |
+| **Natural Language What-If** | Scenario Parser & Farm State Cloner | Transient Memory State Engine |
+| **Saathi Chat Assistant** | Gemini 1.5 Flash + FAISS RAG | Grounded Local Advisory Engine |
