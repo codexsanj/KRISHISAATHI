@@ -27,6 +27,8 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
         "http://localhost:8000",
+        "https://krishisaathi-livid.vercel.app",
+        "https://krishisaathi-bqxfmz6y6-teamzmem.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
